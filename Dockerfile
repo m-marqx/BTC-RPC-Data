@@ -1,7 +1,7 @@
 # Dockerfile for BTC RPC Data Container
 # This container provides a portable data dump of Bitcoin blockchain data
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 LABEL org.opencontainers.image.source="https://github.com/m-marqx/ML-Miner"
 LABEL org.opencontainers.image.description="Bitcoin RPC and OHLCV data container"
@@ -11,7 +11,7 @@ LABEL org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 
 # Install minimal dependencies for data access
-RUN pip install --no-cache-dir pandas==2.0.3 pyarrow==12.0.1
+RUN pip install --no-cache-dir numpy==2.4.0 pandas==2.3.3 pyarrow==22.0.0
 
 # Copy data folder
 COPY data/ ./data/
