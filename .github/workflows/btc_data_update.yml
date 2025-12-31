@@ -20,15 +20,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: auto-data
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create branch if not exists
-        run: |
-          git fetch origin main
-          git checkout auto-data 2>/dev/null || git checkout -b auto-data origin/main
-          git reset --hard origin/main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -96,7 +90,7 @@ jobs:
           file: ./Dockerfile.data
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/ml-miner-data:latest
-            ghcr.io/${{ github.repository_owner }}/ml-miner-data:${{ github.run_number }}
+            ghcr.io/${{ github.repository_owner }}/btc-rpc:latest
+            ghcr.io/${{ github.repository_owner }}/btc-rpc:${{ github.run_number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
