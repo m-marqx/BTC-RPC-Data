@@ -68,7 +68,7 @@ jobs:
         if: steps.git-check.outputs.changes == 'true'
         run: |
           git commit -m "🔄 Auto-update BTC data - $(date +'%Y-%m-%d %H:%M:%S UTC')"
-          git push origin auto-data --force
+          git push origin main --force
 
       - name: Set up Docker Buildx
         if: steps.git-check.outputs.changes == 'true'
