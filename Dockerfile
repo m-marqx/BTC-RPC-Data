@@ -3,7 +3,7 @@
 
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.source="https://github.com/m-marqx/ML-Miner"
+LABEL org.opencontainers.image.source="https://github.com/m-marqx/BTC-RPC-Data"
 LABEL org.opencontainers.image.description="Bitcoin RPC and OHLCV data container"
 LABEL org.opencontainers.image.licenses="MIT"
 
