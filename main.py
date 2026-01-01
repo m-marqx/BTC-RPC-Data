@@ -1,18 +1,22 @@
 """
 BTC Single-Core Updater for GitHub Actions.
 
-This script fetches Bitcoin blockchain data sequentially.
+Fetches Bitcoin blockchain data sequentially using the QuickNode API.
 """
 
 import logging
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from crypto_explorer import QuickNodeAPI
+
+DATA_DIR = Path("data/onchain/BTC/block_stats_fragments")
+INCREMENTAL_DIR = DATA_DIR / "incremental"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,19 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_date_suffix() -> str:
-    """
-    Get current UTC date as suffix for file naming.
-
-    Returns
-    -------
-    str
-        Date string in YYYY-MM-DD format.
-    """
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-
-def update_onchain_data(quant_node_api: QuickNodeAPI, max_blocks: int = 5) -> None:
+def update_onchain_data(api: QuickNodeAPI, max_blocks: int = 5) -> None:
     """
     Update on-chain block stats data sequentially.
 
@@ -56,121 +48,85 @@ def update_onchain_data(quant_node_api: QuickNodeAPI, max_blocks: int = 5) -> No
     """
     start_time = time.perf_counter()
 
-    highest_height = quant_node_api.get_blockchain_info()["blocks"]
-    logger.info("Current blockchain height: %s", highest_height)
+    current_height = api.get_blockchain_info()["blocks"]
+    logger.info("Current blockchain height: %d", current_height)
 
-    data = pd.read_parquet("data/onchain/BTC/block_stats_fragments")
+    # Load and validate existing data
+    data = pd.read_parquet(DATA_DIR)
+    if data["height"].diff().max() > 1:
+        raise ValueError("Missing blocks detected in existing data")
 
-    max_height_diff = data["height"].diff().max()
-    if max_height_diff > 1:
-        raise ValueError("There are missing blocks in the data")
-
-    data["time"] = np.where(data["time"] < 1e10, data["time"] * 1000, data["time"])
+    # Normalize timestamps
+    data["time"] = np.where(data["time"] < 1e10, data["time"] * 1e+6, data["time"])
+    data["time"] = np.where(data["time"] < 1e13, data["time"] * 1e+3, data["time"])
     data = data.set_index("time")
 
-    incremental_folder = "data/onchain/BTC/block_stats_fragments/incremental"
-    if not os.path.exists(incremental_folder):
-        os.makedirs(incremental_folder)
-        logger.info("Incremental folder created!")
-
-    date_suffix = get_date_suffix()
-    file_path = f"{incremental_folder}/incremental_block_stats_{date_suffix}.parquet"
-
-    last_height = int(data["height"].iloc[-1]) + 1
-    logger.info("Last saved height: %s", last_height - 1)
-
-    blocks_to_fetch = min(highest_height - last_height, max_blocks)
+    last_height = int(data["height"].iloc[-1])
+    blocks_to_fetch = min(current_height - last_height, max_blocks)
+    logger.info("Last saved height: %d", last_height)
 
     if blocks_to_fetch <= 0:
         logger.info("No new blocks to fetch. Data is up to date.")
         return
 
-    batch_end = last_height + blocks_to_fetch
+    # Fetch blocks
+    start_height = last_height + 1
+    end_height = start_height + blocks_to_fetch
+
     logger.info(
         "Fetching blocks %s to %s (%s blocks)",
         last_height,
-        batch_end - 1,
+        end_height - 1,
         blocks_to_fetch,
     )
 
     batch_data = []
-    for block_height in range(last_height, batch_end):
+    for height in range(start_height, end_height):
         try:
-            block_stats = quant_node_api.get_block_stats(block_height)
-            if block_stats:
+            if block_stats := api.get_block_stats(height):
                 batch_data.append(block_stats)
-
-            progress = block_height - last_height + 1
-            logger.info(
-                "Progress: %s/%s - Block %s fetched",
-                progress,
-                blocks_to_fetch,
-                block_height,
-            )
-
-        except Exception as e:
-            logger.error("Failed to fetch block %s: %s", block_height, e)
-            continue
+            logger.info("Fetched block %d (%d/%d)", height, len(batch_data), blocks_to_fetch)
+        except Exception:
+            logger.exception("Failed to fetch block %d", height)
 
     if not batch_data:
-        logger.warning("No new blocks were successfully fetched.")
+        logger.warning("No blocks were successfully fetched.")
         return
 
-    new_onchain_data = pd.DataFrame(batch_data)
+    # Save to incremental file
+    INCREMENTAL_DIR.mkdir(parents=True, exist_ok=True)
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    file_path = INCREMENTAL_DIR / f"incremental_block_stats_{date_str}.parquet"
 
-    if os.path.exists(file_path):
-        existing_data = pd.read_parquet(file_path)
-        combined_data = pd.concat([existing_data, new_onchain_data], ignore_index=True)
-        combined_data = combined_data.drop_duplicates(subset=["height"], keep="last")
-    else:
-        combined_data = new_onchain_data
+    new_data = pd.DataFrame(batch_data)
+    if file_path.exists():
+        existing = pd.read_parquet(file_path)
+        new_data = pd.concat([existing, new_data], ignore_index=True)
+        new_data = new_data.drop_duplicates(subset=["height"], keep="last")
 
-    combined_data.to_parquet(file_path)
+    new_data.to_parquet(file_path)
 
-    elapsed_time = time.perf_counter() - start_time
-    logger.info("=== Update Complete ===")
-    logger.info("Blocks saved: %s", len(batch_data))
-    logger.info("Total records in today's file: %s", len(combined_data))
-    logger.info("Elapsed time: %.2f seconds", elapsed_time)
-    logger.info("File saved: %s", file_path)
+    elapsed = time.perf_counter() - start_time
+    logger.info("Saved %d blocks to %s (%.2fs)", len(batch_data), file_path, elapsed)
 
 
 def main() -> None:
-    """
-    Run the BTC data updater.
-
-    Returns
-    -------
-    None
-
-    Raises
-    ------
-    ValueError
-        If no QuickNode API keys are found in environment variables.
-    """
+    """Run the BTC data updater."""
     logger.info("=== BTC Single-Core Updater ===")
-    logger.info(
-        "Run time: %s UTC",
-        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-    )
 
-    api_keys = []
-    for x in range(1, 11):
-        api_key = os.getenv(f"quicknode_endpoint_{x}")
-        if api_key:
-            api_keys.append(api_key)
-
+    api_keys = [
+        key for i in range(1, 11)
+        if (key := os.getenv(f"quicknode_endpoint_{i}"))
+    ]
     if not api_keys:
-        raise ValueError("No QuickNode API keys found in environment variables")
+        raise ValueError("No QuickNode API keys found (quicknode_endpoint_1..10)")
 
-    logger.info("Loaded %s API key(s)", len(api_keys))
+    logger.info("Loaded %d API key(s)", len(api_keys))
 
-    quant_node_api = QuickNodeAPI(api_keys, 0)
+    api = QuickNodeAPI(api_keys, 0)
+    update_onchain_data(api, max_blocks=5)
 
-    logger.info("--- Updating On-Chain Data ---")
-    update_onchain_data(quant_node_api, max_blocks=5)
-
-    logger.info("=== Update Complete ===")
+    logger.info("=== Done ===")
 
 
 if __name__ == "__main__":
