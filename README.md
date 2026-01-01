@@ -111,7 +111,7 @@ git clone https://github.com/m-marqx/BTC-RPC-Data.git
 cd BTC-RPC-Data
 
 # Extract data to ./output folder
-docker compose --profile extract up
+docker compose up
 ```
 
 Or manually copy from a running container:
