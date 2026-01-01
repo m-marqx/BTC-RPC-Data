@@ -1,0 +1,7 @@
+services:
+  fetch-btc-rpc-data:
+    image: ghcr.io/m-marqx/btc-rpc:latest
+    container_name: fetch-btc-rpc-data
+    volumes:
+      - ./output:/output
+    command: python -c "import shutil; shutil.copytree('/app/data', '/output/data', dirs_exist_ok=True); print('Data copied to ./output/data')"
